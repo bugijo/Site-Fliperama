@@ -1,44 +1,94 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { User, Trophy, Gamepad2, Gift, Search, MapPin } from 'lucide-react';
-import { globalRanking, prizes } from '../data/mock';
+import { api } from '../lib/api';
+import { globalRanking, prizes as mockPrizes } from '../data/mock';
+import type { Prize } from '../types';
 import { Link } from 'react-router-dom';
 
 function formatScore(n: number) {
   return n.toLocaleString('pt-BR');
 }
 
+interface ProfileData {
+  nickname: string;
+  bar?: string;
+  globalPosition: number;
+  totalScore: number;
+  gamesPlayed?: number;
+  prizesWon: Prize[];
+  machineName?: string;
+  date?: string;
+}
+
+function mockFallback(query: string): ProfileData | null {
+  const entry = globalRanking.find(
+    (r) => r.nickname.toLowerCase() === query.toLowerCase()
+  );
+  if (!entry) return null;
+  return {
+    nickname: entry.nickname,
+    bar: entry.bar,
+    globalPosition: entry.position,
+    totalScore: entry.score,
+    prizesWon: mockPrizes.filter(
+      (p) => p.holderNickname?.toLowerCase() === query.toLowerCase()
+    ),
+    machineName: entry.machineName,
+    date: entry.date,
+  };
+}
+
 export function Profile() {
   const [nickname, setNickname] = useState('');
   const [searched, setSearched] = useState('');
   const [loading, setLoading] = useState(false);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!nickname.trim()) return;
-    setLoading(true);
-    setTimeout(() => {
-      setSearched(nickname.trim());
-      setLoading(false);
-    }, 600);
-  }
-
-  const playerEntry = searched
-    ? globalRanking.find((r) => r.nickname.toLowerCase() === searched.toLowerCase())
-    : null;
-
-  const playerPrizes = searched
-    ? prizes.filter((p) => p.holderNickname?.toLowerCase() === searched.toLowerCase())
-    : [];
-
-  const notFound = searched && !playerEntry;
+  const handleSearch = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const query = nickname.trim();
+      if (!query) return;
+      setLoading(true);
+      setNotFound(false);
+      setProfile(null);
+      try {
+        const data = await api.player(query);
+        setProfile({
+          nickname: data.nickname,
+          globalPosition: data.globalPosition,
+          totalScore: data.totalScore,
+          gamesPlayed: data.gamesPlayed,
+          prizesWon: data.prizesWon,
+        });
+        setNotFound(false);
+      } catch {
+        const fallback = mockFallback(query);
+        if (fallback) {
+          setProfile(fallback);
+          setNotFound(false);
+        } else {
+          setProfile(null);
+          setNotFound(true);
+        }
+      } finally {
+        setSearched(query);
+        setLoading(false);
+      }
+    },
+    [nickname]
+  );
 
   return (
     <div className="min-h-screen py-16 bg-dots">
       <div className="max-w-2xl mx-auto px-4 sm:px-6">
         {/* Header */}
         <div className="text-center mb-12">
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center mx-auto mb-4"
-            style={{ boxShadow: '0 0 30px rgba(124,58,237,0.5)' }}>
+          <div
+            className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center mx-auto mb-4"
+            style={{ boxShadow: '0 0 30px rgba(124,58,237,0.5)' }}
+          >
             <User size={28} className="text-white" />
           </div>
           <h1 className="font-game font-bold text-white text-2xl sm:text-3xl mb-2">Meu Perfil</h1>
@@ -75,7 +125,7 @@ export function Profile() {
           </div>
         </form>
 
-        {/* Results */}
+        {/* Not found */}
         {notFound && (
           <div className="text-center py-12 card-neon rounded-2xl">
             <p className="text-4xl mb-4">🕹️</p>
@@ -83,39 +133,51 @@ export function Profile() {
             <p className="text-slate-500 text-sm mb-6">
               "{searched}" ainda não está no ranking. Jogue uma partida e apareça aqui!
             </p>
-            <Link to="/mapa" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white btn-primary">
+            <Link
+              to="/mapa"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white btn-primary"
+            >
               <MapPin size={14} />
               Encontrar uma máquina
             </Link>
           </div>
         )}
 
-        {playerEntry && (
+        {/* Profile results */}
+        {profile && (
           <div className="space-y-5 animate-fade-up">
             {/* Stats */}
             <div className="card-neon rounded-2xl p-6">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center font-game font-bold text-white text-sm">
-                  {playerEntry.nickname.charAt(0).toUpperCase()}
+                  {profile.nickname.charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <h2 className="font-game font-bold text-white text-lg">{playerEntry.nickname}</h2>
-                  <p className="text-xs text-slate-500">{playerEntry.bar}</p>
+                  <h2 className="font-game font-bold text-white text-lg">{profile.nickname}</h2>
+                  {profile.bar && <p className="text-xs text-slate-500">{profile.bar}</p>}
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div className="p-4 rounded-xl bg-white/[0.03] border border-purple-900/20">
-                  <div className="text-2xl font-black text-white tabular-nums">#{playerEntry.position}</div>
+                  <div className="text-2xl font-black text-white tabular-nums">
+                    #{profile.globalPosition}
+                  </div>
                   <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Posição</p>
                 </div>
                 <div className="p-4 rounded-xl bg-white/[0.03] border border-purple-900/20">
-                  <div className="text-2xl font-black text-white tabular-nums">{formatScore(playerEntry.score)}</div>
+                  <div className="text-2xl font-black text-white tabular-nums">
+                    {formatScore(profile.totalScore)}
+                  </div>
                   <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Score</p>
                 </div>
                 <div className="p-4 rounded-xl bg-white/[0.03] border border-purple-900/20">
-                  <div className="text-2xl font-black text-white tabular-nums">{playerPrizes.length}</div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Prêmios</p>
+                  <div className="text-2xl font-black text-white tabular-nums">
+                    {profile.gamesPlayed ?? profile.prizesWon.length}
+                  </div>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">
+                    {profile.gamesPlayed != null ? 'Partidas' : 'Prêmios'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -127,43 +189,55 @@ export function Profile() {
                 <h3 className="font-semibold text-white text-sm">Posição no Ranking</h3>
               </div>
               <div className="flex items-center gap-4">
-                <div className="text-5xl font-game font-black"
+                <div
+                  className="text-5xl font-game font-black"
                   style={{
-                    background: playerEntry.position === 1
-                      ? 'linear-gradient(135deg, #fbbf24, #f59e0b)'
-                      : 'linear-gradient(135deg, #a855f7, #60a5fa)',
+                    background:
+                      profile.globalPosition === 1
+                        ? 'linear-gradient(135deg, #fbbf24, #f59e0b)'
+                        : 'linear-gradient(135deg, #a855f7, #60a5fa)',
                     WebkitBackgroundClip: 'text',
                     WebkitTextFillColor: 'transparent',
-                  }}>
-                  #{playerEntry.position}
+                  }}
+                >
+                  #{profile.globalPosition}
                 </div>
                 <div>
                   <p className="text-sm text-slate-300 leading-relaxed">
-                    {playerEntry.position === 1
+                    {profile.globalPosition === 1
                       ? '🏆 Você está em primeiro! Mantenha a liderança até o prazo encerrar.'
-                      : `Você precisa superar ${formatScore(globalRanking[playerEntry.position - 2]?.score ?? 0)} pts para subir uma posição.`}
+                      : 'Continue jogando para subir no ranking e garantir seu prêmio!'}
                   </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <Gamepad2 size={12} className="text-slate-500" />
-                    <span className="text-xs text-slate-500">{playerEntry.machineName} · {playerEntry.date}</span>
-                  </div>
+                  {(profile.machineName || profile.date) && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <Gamepad2 size={12} className="text-slate-500" />
+                      <span className="text-xs text-slate-500">
+                        {[profile.machineName, profile.date].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Prizes */}
-            {playerPrizes.length > 0 && (
+            {profile.prizesWon.length > 0 && (
               <div className="card-neon rounded-2xl p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <Gift size={16} className="text-purple-400" />
                   <h3 className="font-semibold text-white text-sm">Prêmios em Aberto</h3>
                 </div>
                 <div className="space-y-3">
-                  {playerPrizes.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-purple-900/20">
+                  {profile.prizesWon.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-purple-900/20"
+                    >
                       <div>
                         <p className="text-sm font-semibold text-white">{p.label}</p>
-                        <p className="text-xs text-slate-500">{p.bar} · {p.deadline}</p>
+                        <p className="text-xs text-slate-500">
+                          {p.bar} · {p.deadline}
+                        </p>
                       </div>
                       <span className="font-black text-yellow-400 text-lg">R$ {p.amount}</span>
                     </div>
@@ -177,7 +251,10 @@ export function Profile() {
 
             {/* CTA */}
             <div className="text-center pt-2">
-              <Link to="/mapa" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white btn-primary">
+              <Link
+                to="/mapa"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white btn-primary"
+              >
                 <MapPin size={16} />
                 Jogar mais e melhorar score
               </Link>

@@ -2,12 +2,15 @@ import { useState, useEffect } from 'react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { MapPin, Wifi, WifiOff, Trophy, Gamepad2, ChevronRight } from 'lucide-react';
-import { machines } from '../data/mock';
+import { MapPin, Wifi, WifiOff, Trophy, Gamepad2, ChevronRight, RefreshCw } from 'lucide-react';
+import { useQuery } from '../hooks/useQuery';
+import { api } from '../lib/api';
+import { machines as mockMachines } from '../data/mock';
+import { Skeleton, StatusBadge } from '../components/ui/Skeleton';
 import type { Machine } from '../types';
 import { Link } from 'react-router-dom';
 
-// Fix default icon
+// Fix Leaflet default icon
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
@@ -29,9 +32,7 @@ function createNeonIcon(status: Machine['status']) {
 function FlyTo({ machine }: { machine: Machine | null }) {
   const map = useMap();
   useEffect(() => {
-    if (machine) {
-      map.flyTo([machine.lat, machine.lng], 15, { duration: 1 });
-    }
+    if (machine) map.flyTo([machine.lat, machine.lng], 15, { duration: 1 });
   }, [machine, map]);
   return null;
 }
@@ -44,6 +45,21 @@ export function MapPage() {
   const [selected, setSelected] = useState<Machine | null>(null);
   const [filter, setFilter] = useState<'all' | 'active' | 'offline'>('all');
 
+  const {
+    data: machines,
+    loading,
+    isDemo,
+    isRefreshing,
+  } = useQuery((sig) => api.machines(sig), mockMachines, { interval: 30_000 });
+
+  // Keep selected in sync when machines refresh (scores/status may change)
+  useEffect(() => {
+    if (selected) {
+      const updated = machines.find((m) => m.id === selected.id);
+      if (updated) setSelected(updated);
+    }
+  }, [machines]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filtered = machines.filter((m) => filter === 'all' || m.status === filter);
   const activeCount = machines.filter((m) => m.status === 'active').length;
 
@@ -53,10 +69,17 @@ export function MapPage() {
       <aside className="w-full lg:w-80 shrink-0 flex flex-col bg-[#0a0015] border-r border-purple-900/20 overflow-hidden">
         {/* Header */}
         <div className="p-5 border-b border-purple-900/20">
-          <h1 className="font-game font-bold text-white text-lg mb-1">Mapa de Máquinas</h1>
-          <p className="text-xs text-slate-500 mb-4">São Paulo — {activeCount} ativas agora</p>
+          <div className="flex items-center justify-between mb-1">
+            <h1 className="font-game font-bold text-white text-lg">Mapa de Máquinas</h1>
+            <StatusBadge isDemo={isDemo} isRefreshing={isRefreshing} />
+          </div>
 
-          {/* Filters */}
+          {loading ? (
+            <Skeleton className="h-3 w-32 mb-4" />
+          ) : (
+            <p className="text-xs text-slate-500 mb-4">São Paulo — {activeCount} ativas agora</p>
+          )}
+
           <div className="flex gap-1.5">
             {([
               { v: 'all', label: 'Todas' },
@@ -80,34 +103,45 @@ export function MapPage() {
 
         {/* Machine list */}
         <div className="flex-1 overflow-y-auto">
-          {filtered.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setSelected(m)}
-              className={`w-full text-left p-4 border-b border-purple-900/10 transition-all cursor-pointer hover:bg-purple-500/5 ${
-                selected?.id === m.id ? 'bg-purple-500/10 border-l-2 border-l-purple-500' : ''
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div className={`mt-0.5 shrink-0 ${m.status === 'active' ? 'text-emerald-400' : 'text-slate-600'}`}>
-                  {m.status === 'active' ? <Wifi size={16} /> : <WifiOff size={16} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm text-white truncate">{m.bar}</p>
-                  <p className="text-xs text-slate-500 truncate mb-2">{m.neighborhood} — {m.address}</p>
-                  {m.status === 'active' && (
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1">
-                        <Trophy size={11} className="text-yellow-500" />
-                        <span className="text-xs text-slate-400 truncate max-w-[90px]">{m.currentTopPlayer}</span>
-                      </div>
-                      <span className="text-xs font-bold text-white tabular-nums">{formatScore(m.currentTopScore)}</span>
-                    </div>
-                  )}
-                </div>
+          {loading ? (
+            // Skeleton rows while loading
+            Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="p-4 border-b border-purple-900/10 space-y-2">
+                <Skeleton className="h-4 w-36" />
+                <Skeleton className="h-3 w-48" />
+                <Skeleton className="h-3 w-28" />
               </div>
-            </button>
-          ))}
+            ))
+          ) : (
+            filtered.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setSelected(m)}
+                className={`w-full text-left p-4 border-b border-purple-900/10 transition-all cursor-pointer hover:bg-purple-500/5 ${
+                  selected?.id === m.id ? 'bg-purple-500/10 border-l-2 border-l-purple-500' : ''
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 shrink-0 ${m.status === 'active' ? 'text-emerald-400' : 'text-slate-600'}`}>
+                    {m.status === 'active' ? <Wifi size={16} /> : <WifiOff size={16} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white truncate">{m.bar}</p>
+                    <p className="text-xs text-slate-500 truncate mb-2">{m.neighborhood} — {m.address}</p>
+                    {m.status === 'active' && (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <Trophy size={11} className="text-yellow-500" />
+                          <span className="text-xs text-slate-400 truncate max-w-[90px]">{m.currentTopPlayer}</span>
+                        </div>
+                        <span className="text-xs font-bold text-white tabular-nums">{formatScore(m.currentTopScore)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))
+          )}
         </div>
       </aside>
 
@@ -117,7 +151,7 @@ export function MapPage() {
           center={[-23.5729, -46.6728]}
           zoom={12}
           className="w-full h-full"
-          zoomControl={true}
+          zoomControl
         >
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -139,29 +173,26 @@ export function MapPage() {
                   </div>
                   <p className="font-bold text-white text-sm mb-0.5">{m.bar}</p>
                   <p className="text-xs text-slate-400 mb-3">{m.address}</p>
-                  {m.status === 'active' && (
-                    <>
-                      <div className="border-t border-purple-900/30 pt-3 mb-3 space-y-1.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-400">Líder:</span>
-                          <span className="font-bold text-purple-300">{m.currentTopPlayer}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-400">Score:</span>
-                          <span className="font-bold text-white">{formatScore(m.currentTopScore)}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-400">Prêmio dia:</span>
-                          <span className="font-bold text-yellow-400">R$ {m.dailyPrize}</span>
-                        </div>
-                        <div className="flex items-center gap-1 justify-end text-xs text-slate-500 mt-1">
-                          <Gamepad2 size={10} />
-                          <span>{m.playersToday} partidas hoje</span>
-                        </div>
+                  {m.status === 'active' ? (
+                    <div className="border-t border-purple-900/30 pt-3 mb-3 space-y-1.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-400">Líder:</span>
+                        <span className="font-bold text-purple-300">{m.currentTopPlayer}</span>
                       </div>
-                    </>
-                  )}
-                  {m.status === 'offline' && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-400">Score:</span>
+                        <span className="font-bold text-white">{formatScore(m.currentTopScore)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-400">Prêmio dia:</span>
+                        <span className="font-bold text-yellow-400">R$ {m.dailyPrize}</span>
+                      </div>
+                      <div className="flex items-center gap-1 justify-end text-xs text-slate-500 mt-1">
+                        <Gamepad2 size={10} />
+                        <span>{m.playersToday} partidas hoje</span>
+                      </div>
+                    </div>
+                  ) : (
                     <p className="text-xs text-slate-500 italic">Máquina temporariamente offline</p>
                   )}
                 </div>
@@ -183,7 +214,12 @@ export function MapPage() {
                     <span className="text-xs text-slate-500">{selected.address}</span>
                   </div>
                 </div>
-                <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-white text-lg leading-none cursor-pointer ml-2">×</button>
+                <button
+                  onClick={() => setSelected(null)}
+                  className="text-slate-500 hover:text-white text-lg leading-none cursor-pointer ml-2"
+                >
+                  ×
+                </button>
               </div>
 
               {selected.status === 'active' ? (
@@ -216,6 +252,14 @@ export function MapPage() {
                 Ver ranking <ChevronRight size={14} />
               </Link>
             </div>
+          </div>
+        )}
+
+        {/* Refresh indicator overlay */}
+        {isRefreshing && (
+          <div className="absolute top-4 right-4 z-[400] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0a0015]/90 border border-purple-900/40 text-xs text-purple-400">
+            <RefreshCw size={11} className="animate-spin" />
+            Atualizando...
           </div>
         )}
       </div>

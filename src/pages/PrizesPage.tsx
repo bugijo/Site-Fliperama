@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { Gift, Clock, MapPin, Star, Lock, ChevronRight } from 'lucide-react';
-import { prizes } from '../data/mock';
+import { useQuery } from '../hooks/useQuery';
+import { api } from '../lib/api';
+import { prizes as mockPrizes } from '../data/mock';
+import { SkeletonPrizeCard, Skeleton, StatusBadge } from '../components/ui/Skeleton';
 import type { Prize } from '../types';
 import { Link } from 'react-router-dom';
 
@@ -44,9 +47,7 @@ function PrizeCard({ prize }: { prize: Prize }) {
           style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(234,179,8,0.08) 0%, transparent 70%)' }}
         />
       )}
-
       <div className="relative">
-        {/* Type badge */}
         <div className="flex items-center justify-between mb-4">
           <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold tracking-wider ${cfg.badge}`}>
             {cfg.emoji} {cfg.label}
@@ -58,17 +59,17 @@ function PrizeCard({ prize }: { prize: Prize }) {
           )}
         </div>
 
-        {/* Amount */}
         <div
           className="font-game font-black mb-1"
           style={{
             fontSize: prize.type === 'monthly' ? '3rem' : '2.25rem',
             lineHeight: 1,
-            background: prize.type === 'monthly'
-              ? 'linear-gradient(135deg, #fbbf24, #f59e0b)'
-              : prize.type === 'weekly'
-              ? 'linear-gradient(135deg, #a855f7, #60a5fa)'
-              : 'linear-gradient(135deg, #60a5fa, #38bdf8)',
+            background:
+              prize.type === 'monthly'
+                ? 'linear-gradient(135deg, #fbbf24, #f59e0b)'
+                : prize.type === 'weekly'
+                ? 'linear-gradient(135deg, #a855f7, #60a5fa)'
+                : 'linear-gradient(135deg, #60a5fa, #38bdf8)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
           }}
@@ -79,7 +80,6 @@ function PrizeCard({ prize }: { prize: Prize }) {
 
         <div className="neon-divider mb-4" />
 
-        {/* Details */}
         <div className="space-y-2 text-sm mb-4">
           <div className="flex items-center gap-2 text-slate-400">
             <MapPin size={13} className="shrink-0 text-purple-400" />
@@ -92,7 +92,7 @@ function PrizeCard({ prize }: { prize: Prize }) {
           {prize.holderNickname && (
             <div className="flex items-center gap-2">
               <Star size={13} className="shrink-0 text-yellow-500" />
-              <span className="text-slate-400">Líder atual: </span>
+              <span className="text-slate-400">Líder atual:</span>
               <span className="font-bold text-yellow-400">{prize.holderNickname}</span>
             </div>
           )}
@@ -118,21 +118,36 @@ function PrizeCard({ prize }: { prize: Prize }) {
 export function PrizesPage() {
   const [filter, setFilter] = useState<'all' | 'daily' | 'weekly' | 'monthly'>('all');
 
+  const { data: prizes, loading, isDemo, isRefreshing } = useQuery(
+    (sig) => api.prizes(sig),
+    mockPrizes,
+    { interval: 60_000 } // refresh every minute — prize state can change
+  );
+
   const filtered = prizes.filter((p) => filter === 'all' || p.type === filter);
-  const monthly = prizes.filter((p) => p.type === 'monthly');
+  const grandPrize = prizes.find((p) => p.type === 'monthly');
 
   return (
     <div className="min-h-screen py-12">
       {/* Grand Prize Hero */}
-      {monthly.map((p) => (
+      {loading ? (
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-14 text-center space-y-4 mb-16">
+          <Skeleton className="h-16 w-16 rounded-2xl mx-auto" />
+          <Skeleton className="h-6 w-48 mx-auto" />
+          <Skeleton className="h-20 w-56 mx-auto" />
+          <Skeleton className="h-4 w-64 mx-auto" />
+          <Skeleton className="h-4 w-52 mx-auto" />
+        </div>
+      ) : grandPrize ? (
         <div
-          key={p.id}
           className="relative overflow-hidden mb-16"
           style={{ background: 'linear-gradient(180deg, rgba(234,179,8,0.08) 0%, transparent 100%)' }}
         >
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-14 text-center">
             <div className="text-6xl mb-5 animate-float">👑</div>
-            <p className="text-yellow-400 text-xs font-bold uppercase tracking-widest mb-3">Grand Prize — Abril 2026</p>
+            <p className="text-yellow-400 text-xs font-bold uppercase tracking-widest mb-3">
+              {grandPrize.label}
+            </p>
             <h1
               className="font-game font-black mb-3"
               style={{
@@ -143,26 +158,33 @@ export function PrizesPage() {
                 filter: 'drop-shadow(0 0 30px rgba(251,191,36,0.4))',
               }}
             >
-              R$ 1.000
+              R$ {grandPrize.amount.toLocaleString('pt-BR')}
             </h1>
-            <p className="text-slate-300 text-lg mb-2">em dinheiro para o maior score global do mês</p>
-            <p className="text-slate-500 text-sm mb-8">Encerra 30/04 às 23h59 · Qualquer bar parceiro</p>
-            <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
-              <Star size={14} className="text-yellow-500" />
-              Líder atual:
-              <span className="font-bold text-yellow-400">{p.holderNickname}</span>
-              <span className="text-slate-600">— você pode bater!</span>
-            </div>
+            <p className="text-slate-300 text-lg mb-2">{grandPrize.description}</p>
+            <p className="text-slate-500 text-sm mb-8">
+              Encerra {grandPrize.deadline} · {grandPrize.bar}
+            </p>
+            {grandPrize.holderNickname && (
+              <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
+                <Star size={14} className="text-yellow-500" />
+                Líder atual:
+                <span className="font-bold text-yellow-400">{grandPrize.holderNickname}</span>
+                <span className="text-slate-600">— você pode bater!</span>
+              </div>
+            )}
           </div>
         </div>
-      ))}
+      ) : null}
 
       {/* All prizes */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
-          <div>
-            <h2 className="font-game font-bold text-white text-2xl">Todos os Prêmios</h2>
-            <p className="text-slate-500 text-sm mt-1">Prêmios ativos agora em São Paulo</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h2 className="font-game font-bold text-white text-2xl">Todos os Prêmios</h2>
+              <p className="text-slate-500 text-sm mt-1">Prêmios ativos agora em São Paulo</p>
+            </div>
+            <StatusBadge isDemo={isDemo} isRefreshing={isRefreshing} />
           </div>
           <div className="flex gap-1.5 flex-wrap">
             {([
@@ -187,10 +209,17 @@ export function PrizesPage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filtered.map((prize) => (
-            <PrizeCard key={prize.id} prize={prize} />
-          ))}
+          {loading
+            ? Array.from({ length: 6 }).map((_, i) => <SkeletonPrizeCard key={i} />)
+            : filtered.map((prize) => <PrizeCard key={prize.id} prize={prize} />)}
         </div>
+
+        {!loading && filtered.length === 0 && (
+          <div className="py-16 text-center text-slate-500">
+            <p className="text-3xl mb-3">🎁</p>
+            <p>Nenhum prêmio nesta categoria no momento.</p>
+          </div>
+        )}
 
         {/* How to claim */}
         <div className="mt-16 p-8 rounded-2xl card-neon text-center">
